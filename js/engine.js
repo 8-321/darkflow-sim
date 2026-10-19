@@ -2,10 +2,31 @@
 import { ITEMS, VENDORS, COMPANIES, AUCTION_POOL, EVENTS, CONTRACTS, DIALOGS, CATS, RARITY, ACHIEVEMENTS } from './data.js';
 
 const SAVE_KEY = 'darkflow.save.v1';
-const rnd = (a = 0, b = 1) => a + Math.random() * (b - a);
-const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+const DAILY_KEY = 'darkflow.daily.v1';
+const BOARD_KEY = 'darkflow.daily.board.v1';
+let slotKey = SAVE_KEY;
+let rand = Math.random;
+
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function hash32(str) {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < str.length; i++) h = Math.imul(h ^ str.charCodeAt(i), 16777619);
+  return h >>> 0;
+}
+export function seedRng(seed) {
+  rand = seed == null ? Math.random : mulberry32(typeof seed === 'number' ? seed : hash32(String(seed)));
+}
+const rnd = (a = 0, b = 1) => a + rand() * (b - a);
+const pick = (arr) => arr[Math.floor(rand() * arr.length)];
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-const uid = () => Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-3);
+const uid = () => rand().toString(36).slice(2, 8) + Date.now().toString(36).slice(-3);
 
 export const fmt = (n) => Math.round(n).toLocaleString('en-US');
 export const itemDef = (id) => ITEMS.find((i) => i.id === id) || null;
@@ -94,18 +115,18 @@ export function newGame(alias) {
 
 export function save() {
   try {
-    const data = JSON.stringify(S);
-    localStorage.setItem(SAVE_KEY, data);
+    localStorage.setItem(slotKey, JSON.stringify(S));
     S.lastSaved = Date.now();
   } catch (e) { /* quota */ }
 }
 
 export function load() {
   try {
-    const raw = localStorage.getItem(SAVE_KEY);
+    const raw = localStorage.getItem(slotKey);
     if (!raw) return false;
     const data = JSON.parse(raw);
     if (!data || data.version !== 1) return false;
+    Object.keys(S).forEach((k) => { delete S[k]; });
     Object.assign(S, data);
     if (!S.market || !S.market.length) buildMarket();
     if (!S.auctions || !S.auctions.length) seedAuctions();
@@ -113,7 +134,104 @@ export function load() {
   } catch (e) { return false; }
 }
 
-export function wipe() { localStorage.removeItem(SAVE_KEY); }
+export function wipe() {
+  localStorage.removeItem(SAVE_KEY);
+  localStorage.removeItem(DAILY_KEY);
+  localStorage.removeItem(BOARD_KEY);
+}
+
+// ── 每日挑战（固定种子 · 10 分钟 · 本机榜） ────────────────
+export function todayStr() {
+  const d = new Date();
+  return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+}
+function readBoard() {
+  try { return JSON.parse(localStorage.getItem(BOARD_KEY)) || {}; } catch (e) { return {}; }
+}
+function writeBoard(b) {
+  try { localStorage.setItem(BOARD_KEY, JSON.stringify(b)); } catch (e) { /* quota */ }
+}
+export function dailyBoard(date = todayStr()) {
+  const list = readBoard()[date] || [];
+  return list.slice().sort((a, b) => b.worth - a.worth);
+}
+export function dailyInfo() {
+  try {
+    const raw = localStorage.getItem(DAILY_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    return data && data.daily ? data.daily : null;
+  } catch (e) { return null; }
+}
+export function dailyLeft() {
+  if (!S.daily || S.daily.finished) return 0;
+  return Math.max(0, S.daily.endsAt - Date.now());
+}
+export function startDaily() {
+  if (slotKey === DAILY_KEY && S.daily && !S.daily.finished) return S.daily;
+  const date = todayStr();
+  const prev = dailyInfo();
+  if (prev && prev.date === date && prev.finished) return null;   // 一天一局
+  save();                      // 主线进度先落盘
+  const keepSettings = S.settings;
+  slotKey = DAILY_KEY;
+  seedRng('DF-' + date);
+  Object.keys(S).forEach((k) => { delete S[k]; });
+  newGame('challenger');
+  S.alias = 'challenger';
+  S.settings = keepSettings || S.settings;
+  S.daily = { date, endsAt: Date.now() + 10 * 60 * 1000, start: Math.round(netWorth()), finished: false, score: 0, rank: 0 };
+  save();
+  emit('dailyStart');
+  return S.daily;
+}
+export function resumeDaily() {
+  if (slotKey === DAILY_KEY) return true;
+  const info = dailyInfo();
+  if (!info || info.finished || info.date !== todayStr()) return false;
+  slotKey = DAILY_KEY;
+  const ok = load();
+  if (ok) seedRng('DF-' + info.date);
+  emit('dailyStart');
+  return ok;
+}
+export function finishDaily() {
+  if (!S.daily || S.daily.finished) return S.daily;
+  const score = Math.round(netWorth());
+  const board = readBoard();
+  const list = board[S.daily.date] || [];
+  const entry = { id: uid(), alias: S.alias, worth: score, at: Date.now() };
+  list.push(entry);
+  list.sort((a, b) => b.worth - a.worth);
+  const trimmed = list.slice(0, 10);
+  board[S.daily.date] = trimmed;
+  writeBoard(board);
+  S.daily.finished = true;
+  S.daily.score = score;
+  S.daily.rank = trimmed.findIndex((e) => e.id === entry.id) + 1;
+  save();
+  emit('dailyEnd');
+  return S.daily;
+}
+export function checkDaily() {
+  if (S.daily && !S.daily.finished && Date.now() >= S.daily.endsAt) return finishDaily();
+  return null;
+}
+export function abandonDaily() {
+  localStorage.removeItem(DAILY_KEY);
+  slotKey = SAVE_KEY;
+  seedRng(null);
+  emit('dailyExit');
+}
+export function exitDaily() {
+  save();
+  slotKey = SAVE_KEY;
+  seedRng(null);
+  Object.keys(S).forEach((k) => { delete S[k]; });
+  const ok = load();
+  emit('dailyExit');
+  return ok;
+}
 
 // ── 存档码（离线迁移 / 私域分享） ─────────────────────────
 const b64enc = (str) => {
@@ -189,14 +307,14 @@ function buildMarket() {
 
 function seedAuctions() {
   S.auctions = [];
-  const pool = [...AUCTION_POOL].sort(() => Math.random() - 0.5).slice(0, 3);
+  const pool = [...AUCTION_POOL].sort(() => rand() - 0.5).slice(0, 3);
   pool.forEach((p) => spawnAuction(p));
 }
 
 function spawnAuction(p) {
   const def = itemDef(p.defId);
   const names = ['灰鹭', 'ZERO', '第七个买家', '南风', 'THE_BANKER', '无人', 'm0th', '9'];
-  const bidders = names.sort(() => Math.random() - 0.5).slice(0, 4).map((n, i) => ({
+  const bidders = names.sort(() => rand() - 0.5).slice(0, 4).map((n, i) => ({
     name: n, aggression: rnd(.35, 1), delay: rnd(1500, 6000), lastBid: 0,
   }));
   S.auctions.push({
@@ -239,7 +357,7 @@ function driftMarket() {
     m.price = Math.max(30, Math.round(next));
     m.prev = prev;
     m.trend = m.price - prev;
-    if (Math.random() < 0.25) m.stock = clamp(m.stock + Math.floor(rnd(-1, 2)), 0, 6);
+    if (rand() < 0.25) m.stock = clamp(m.stock + Math.floor(rnd(-1, 2)), 0, 6);
   });
 }
 
@@ -271,7 +389,7 @@ export function buyListing(uidOrId, qty = 1) {
     status: 'transit',
     fake: false,
     inspected: false,
-    escrow: '0x' + Math.random().toString(16).slice(2, 10) + Math.random().toString(16).slice(2, 10),
+    escrow: '0x' + rand().toString(16).slice(2, 10) + rand().toString(16).slice(2, 10),
   };
   S.orders.push(order);
   S.stats.trades++;
@@ -303,7 +421,7 @@ export function inspectOrder(orderId) {
   const below = marketNow ? clamp((marketNow.price - o.price / o.qty) / marketNow.price, 0, .35) : 0;
   let fakeChance = clamp((5 - v.rating) * 0.075 + below * 0.9 + 0.015, 0.01, 0.55);
   if (S.companies.intel > 0) fakeChance *= 0.82;
-  const fake = Math.random() < fakeChance;
+  const fake = rand() < fakeChance;
   o.fake = fake;
   o.inspected = true;
   o.status = 'inspected';
@@ -396,7 +514,7 @@ function settleSellOrders() {
     const repF = 0.45 + S.rep / 90;
     const fakeF = so.fake ? 0.55 : 1;
     const p = clamp(0.22 * repF * fakeF * clamp(1.55 - premium, 0.03, 1.4), 0.01, 0.75);
-    if (Math.random() < p) {
+    if (rand() < p) {
       const fee = Math.round(so.ask * 0.03);
       S.credits += so.ask - fee;
       S.stats.trades++;
@@ -468,8 +586,8 @@ export function aiAuctionTick() {
       const heat = a.current / a.start;
       const urgency = left < 30 ? 1.6 : 1;
       const chance = clamp(0.10 + b.aggression * 0.22 * urgency - (heat - 1) * 0.15, 0.02, 0.55);
-      if (Math.random() < chance) {
-        const inc = a.step * (Math.random() < 0.18 ? 2 : 1);
+      if (rand() < chance) {
+        const inc = a.step * (rand() < 0.18 ? 2 : 1);
         const amount = a.current + inc;
         const wasPlayer = a.playerTop;
         if (wasPlayer) refundAuction(a);
@@ -559,7 +677,7 @@ function companyTick() {
       const ids = ITEMS.filter((i) => i.cat === 'id');
       for (let k = 0; k < lv; k++) {
         const d = pick(ids);
-        addInv(d.id, 1, d.base * 0.45, Math.random() < 0.08);
+        addInv(d.id, 1, d.base * 0.45, rand() < 0.08);
       }
       pushLog('forge', `工坊产出 ${lv} 件身份货`, 0);
     }
@@ -595,7 +713,7 @@ export function mix(amount) {
   const laundry = S.companies.laundry || 0;
   const feeRate = 0.08 * (1 - Math.min(0.5, laundry * 0.1));
   const fee = Math.round(amount * feeRate);
-  const contaminated = Math.random() < 0.12;
+  const contaminated = rand() < 0.12;
   S.credits -= fee;
   let lost = 0;
   if (contaminated) { lost = Math.round(amount * 0.3); S.credits -= lost; }
@@ -626,7 +744,7 @@ export function maybeEvent() {
   const h = S.hour;
   if (h % 6 === 0 && S.heat > 25) {
     const chance = clamp((S.heat - 25) / 105, 0.06, 0.72);
-    if (Math.random() < chance) {
+    if (rand() < chance) {
       const ev = EVENTS.find((e) => e.id === 'raid');
       S.pendingEvent = { ...ev, ctx: {} };
       return;
@@ -635,8 +753,8 @@ export function maybeEvent() {
   if (h % 3 === 0) {
     const pool = EVENTS.filter((e) => e.id !== 'raid' && S.heat >= (e.minHeat || 0));
     const total = pool.reduce((s, e) => s + e.weight, 0);
-    if (Math.random() < 0.26) {
-      let r = Math.random() * total;
+    if (rand() < 0.26) {
+      let r = rand() * total;
       let chosen = pool[0];
       for (const e of pool) { r -= e.weight; if (r <= 0) { chosen = e; break; } }
       S.pendingEvent = { ...chosen, ctx: {} };
@@ -656,10 +774,10 @@ export function resolveEvent(choiceIndex) {
   if (e.flag) S.flags[e.flag] = true;
   if (e.riskRaid) {
     S.stats.raids++;
-    if (Math.random() < 0.45) {
+    if (rand() < 0.45) {
       const lost = Math.round(S.credits * 0.15);
       S.credits -= lost;
-      if (S.inv.length) S.inv.splice(Math.floor(Math.random() * S.inv.length), 1);
+      if (S.inv.length) S.inv.splice(Math.floor(rand() * S.inv.length), 1);
       addHeat(10);
       pushLog('raid', `扫荡命中 · 损失 ${fmt(lost)} DKC 与部分库存`, -lost);
       S.pendingEvent = null; save(); emit('change');
@@ -727,7 +845,7 @@ export function retire() { if (!S.ending) triggerEnding('retire'); }
 
 // ── 破解奖励 ────────────────────────────────────────────
 export function cleanReward() {
-  const gain = Math.round(320 + Math.random() * 680);
+  const gain = Math.round(320 + rand() * 680);
   S.credits += gain;
   S.heat = clamp(S.heat - 1.5, 0, 100);
   S.rep = clamp(S.rep + 1, 0, 100);
@@ -754,6 +872,7 @@ export function crackReward() {
 // ── 主循环 ──────────────────────────────────────────────
 export function tick(hours = 1) {
   if (S.ending) return;
+  if (S.daily && !S.daily.finished && Date.now() >= S.daily.endsAt) finishDaily();
   for (let i = 0; i < hours; i++) {
     S.hour++;
     driftMarket();

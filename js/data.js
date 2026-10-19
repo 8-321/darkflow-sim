@@ -4,7 +4,7 @@
 export const META = {
   title: 'DARKFLOW',
   cn: '暗河',
-  version: '1.1.0',
+  version: '1.2.0',
   addr: 'darkflow7kx9q2vz4m8w.onion',
   currency: 'DKC',
   disclaimer: '虚构模拟 · 无真实交易 · 无真实服务',

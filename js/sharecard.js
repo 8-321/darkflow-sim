@@ -44,7 +44,8 @@ function label(ctx, text, x, y, color = DIM2, size = 18) {
   ctx.fillText(text, x, y);
 }
 
-export function drawShareCard(state, meta, clock, fmt, netWorth, itemDef) {
+export function drawShareCard(state, meta, clock, fmt, netWorth, itemDef, opts = {}) {
+  const daily = opts.daily || null;
   const cv = document.createElement('canvas');
   cv.width = W;
   cv.height = H;
@@ -57,7 +58,7 @@ export function drawShareCard(state, meta, clock, fmt, netWorth, itemDef) {
   // 顶部品牌
   ctx.fillStyle = ACID;
   ctx.font = F(18, '500', true);
-  ctx.fillText('DARKFLOW  //  SIMULATION ONLY', 72, 88);
+  ctx.fillText(daily ? `DARKFLOW // DAILY CHALLENGE #${daily.date}` : 'DARKFLOW  //  SIMULATION ONLY', 72, 88);
 
   ctx.fillStyle = FG;
   ctx.font = F(76, '700');
@@ -77,6 +78,11 @@ export function drawShareCard(state, meta, clock, fmt, netWorth, itemDef) {
   ctx.fillStyle = ACID;
   ctx.font = F(22, '500');
   ctx.fillText(`@${state.alias}`, W - 72, 184);
+  if (daily) {
+    ctx.fillStyle = ACID;
+    ctx.font = F(15, '500', true);
+    ctx.fillText(`RANK #${daily.rank || '—'}  ·  10 MIN`, W - 72, 212);
+  }
   ctx.textAlign = 'left';
 
   // 分隔

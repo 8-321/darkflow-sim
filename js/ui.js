@@ -5,6 +5,7 @@ import {
   buyCompany, companyCost, companiesOwned, mix, newIdentity, resolveEvent, markMsgsRead, unread,
   contractProgress, retire, triggerEnding, crackReward, cleanReward, subscribe, save, wipe, newGame, load, pushMsg, exportCode, importCode,
   tick, aiAuctionTick,
+  startDaily, resumeDaily, dailyInfo, dailyBoard, dailyLeft, finishDaily, exitDaily, abandonDaily, checkDaily, todayStr,
 } from './engine.js';
 import { CATS, RARITY, VENDORS, COMPANIES, CONTRACTS, NPCS, ACHIEVEMENTS, BROADCASTS, TERMINAL_HELP, META, FLAVOR, AUCTION_POOL, ITEMS } from './data.js';
 import { initAudio, sfx, setSound } from './audio.js';
@@ -119,8 +120,17 @@ function num(el, val, suffix = '') {
 function renderTop() {
   const c = clock();
   $('#clock').textContent = c.label;
-  const online = 1200 + Math.round(Math.sin(Date.now() / 60000) * 120 + Math.random() * 60);
-  $('#online').innerHTML = `<i class="pulse"></i>${fmt(online)} 在线`;
+  if (S.daily && !S.daily.finished) {
+    const left = dailyLeft();
+    const mm = String(Math.floor(left / 60000)).padStart(2, '0');
+    const ss = String(Math.floor((left % 60000) / 1000)).padStart(2, '0');
+    $('#online').classList.add('daily-live');
+    $('#online').innerHTML = `DAILY <b>${mm}:${ss}</b>`;
+  } else {
+    const online = 1200 + Math.round(Math.sin(Date.now() / 60000) * 120 + Math.random() * 60);
+    $('#online').classList.remove('daily-live');
+    $('#online').innerHTML = `<i class="pulse"></i>${fmt(online)} 在线`;
+  }
   num($('#credits'), S.credits);
   num($('#rep'), Math.round(S.rep));
   const h = Math.round(S.heat);
@@ -147,7 +157,36 @@ function renderRail() {
   const feed = broadcasts.slice(0, 9).map((b) => `<div class="feed-row"><span class="dot"></span><span>${esc(b.text)}</span></div>`).join('');
   const cs = CONTRACTS.map((c) => ({ c, p: contractProgress(c.id) })).filter((x) => x.p < 1).slice(0, 2);
   const logs = S.log.slice(0, 7).map((l) => `<div class="log-row ${l.delta < 0 ? 'neg' : l.delta > 0 ? 'pos' : ''}"><span class="lt">${esc(l.text)}</span>${l.delta ? `<span class="ld">${l.delta > 0 ? '+' : ''}${fmt(l.delta)}</span>` : ''}</div>`).join('');
+  const dInfo = dailyInfo();
+  const canResume = !!(dInfo && !dInfo.finished && dInfo.date === todayStr());
+  let dailyBlock;
+  if (S.daily && !S.daily.finished) {
+    const left = dailyLeft();
+    const mm = String(Math.floor(left / 60000)).padStart(2, '0');
+    const ss = String(Math.floor((left % 60000) / 1000)).padStart(2, '0');
+    dailyBlock = `<section class="panel daily-panel">
+      <div class="panel-head"><span>每日挑战</span><span class="mini">LIVE</span></div>
+      <div class="dp-top"><b>${mm}:${ss}</b><span>剩余</span></div>
+      <div class="mini-bar"><i style="width:${Math.min(100, (1 - left / 600000) * 100)}%"></i></div>
+      <div class="dp-row"><span>净资产</span><b>${fmt(Math.round(netWorth()))} DKC</b></div>
+      <button class="btn sm" id="railDaily">结算 / 看榜</button>
+    </section>`;
+  } else if (dInfo && dInfo.finished && dInfo.date === todayStr()) {
+    dailyBlock = `<section class="panel daily-panel">
+      <div class="panel-head"><span>每日挑战</span><span class="mini">DONE</span></div>
+      <div class="dp-top"><b>${fmt(dInfo.score)}</b><span>DKC · 第 ${dInfo.rank || '—'} 名</span></div>
+      <p class="dp-note">今天的局已结束。明天开盘价会换。</p>
+      <button class="btn sm" id="railDaily">查看战绩</button>
+    </section>`;
+  } else {
+    dailyBlock = `<section class="panel daily-panel">
+      <div class="panel-head"><span>每日挑战</span><span class="mini">10 MIN</span></div>
+      <p class="dp-note">${canResume ? '今天的局还没结束，计时仍在走。' : '固定开盘价，一天一局，本机榜。'}</p>
+      <button class="btn sm ${canResume ? 'primary' : ''}" id="railDaily">${canResume ? '继续挑战' : '开始挑战'}</button>
+    </section>`;
+  }
   rail.innerHTML = `
+    ${dailyBlock}
     <section class="panel">
       <div class="panel-head"><span>实时广播</span><i class="live"></i></div>
       <div class="feed">${feed}</div>
@@ -166,6 +205,8 @@ function renderRail() {
       <div class="loglist">${logs || '<div class="empty-mini">还没有记录。</div>'}</div>
     </section>
     <div class="rail-foot">${esc(FLAVOR[Math.floor(Math.random() * FLAVOR.length)])}</div>`;
+  const rd = $('#railDaily');
+  if (rd) rd.onclick = openDailyEntry;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -980,6 +1021,8 @@ function renderProfile() {
         <label class="sw"><input type="checkbox" id="setFx" ${S.settings.fx ? 'checked' : ''}><span>减少动效</span></label>
       </div>
       <div class="save-tools">
+        <button class="btn sm" id="btnDaily">每日挑战</button>
+        <button class="btn sm" id="btnBoard">今日榜</button>
         <button class="btn sm" id="btnShareCard">生成行情卡</button>
         <button class="btn sm" id="btnExportCode">导出存档码</button>
         <button class="btn sm" id="btnImportCode">导入存档码</button>
@@ -991,7 +1034,7 @@ function renderProfile() {
   $('#setCrt').onchange = (e) => { S.settings.crt = e.target.checked; document.body.classList.toggle('no-crt', !e.target.checked); save(); };
   $('#setFx').onchange = (e) => { S.settings.fx = e.target.checked; document.body.classList.toggle('reduce-motion', e.target.checked); save(); };
   $('#btnShareCard').onclick = () => {
-    const cv = drawShareCard(S, META, clock, fmt, netWorth, itemDef);
+    const cv = drawShareCard(S, META, clock, fmt, netWorth, itemDef, { daily: S.daily || null });
     const url = cv.toDataURL('image/png');
     openModal({
       title: '今日行情卡', sub: '1080 × 1350 · 可直接发群', wide: true,
@@ -1049,6 +1092,8 @@ function renderProfile() {
     setTimeout(() => $('#importCodeBox')?.focus(), 80);
   };
 
+  $('#btnDaily').onclick = openDailyEntry;
+  $('#btnBoard').onclick = showBoard;
   $('#retireBtn').onclick = () => openModal({
     title: '金盆洗手？', sub: '按净资产结算', body: `<p class="p-note big">你会带着现有的钱离开暗河。没有结局过场，只有一张账单。</p>`,
     actions: [{ label: '结算', primary: true, onClick: () => { closeModal(); retire(); showEnding(); } }, { label: '再干一会', onClick: closeModal }],
@@ -1185,6 +1230,13 @@ function startLoop() {
   }, 2200));
 
   timers.push(setInterval(() => {
+    if (S.daily && !S.daily.finished) {
+      if (Date.now() >= S.daily.endsAt) finishDaily();
+      else renderTop();
+    }
+  }, 1000));
+
+  timers.push(setInterval(() => {
     if (document.hidden) return;
     const tpl = BROADCASTS[Math.floor(Math.random() * BROADCASTS.length)];
     const d = itemDef(ITEMS[Math.floor(Math.random() * ITEMS.length)].id);
@@ -1212,11 +1264,100 @@ function applySettings() {
   document.body.classList.toggle('reduce-motion', S.settings.fx === true);
 }
 
+function downloadCard(url, d) {
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `darkflow-daily-${d ? d.date : todayStr()}-${S.alias}.png`;
+  a.click();
+  toast('good', '已保存', 'PNG 已下载。');
+}
+
+function showBoard() {
+  const list = dailyBoard();
+  const rows = list.length
+    ? list.map((e, i) => `<div class="lb-row"><b>${String(i + 1).padStart(2, '0')}</b><span>@${esc(e.alias)}</span><i>${fmt(e.worth)} DKC</i></div>`).join('')
+    : `<p class="p-note big">今天还没有战绩。跑一局，就是第一条。</p>`;
+  openModal({
+    title: '今日榜', sub: `#${todayStr()} · 本机记录`, wide: true,
+    body: `<div class="lb">${rows}</div><p class="p-note">只记录这台机器跑过的挑战，不上传任何数据。</p>`,
+    actions: [{ label: '关闭', onClick: closeModal }],
+  });
+}
+
+function showDailyResult() {
+  const d = S.daily;
+  if (!d || !d.finished) return;
+  const url = drawShareCard(S, META, clock, fmt, netWorth, itemDef, { daily: d }).toDataURL('image/png');
+  openModal({
+    title: '挑战结束', sub: `DAILY #${d.date} · 10 分钟`, wide: true, esc: false,
+    body: `<p class="p-note big">从 <b>${fmt(d.start)}</b> 做到 <b class="acid">${fmt(d.score)}</b> DKC，本机第 <b>${d.rank || '—'}</b> 名。</p>
+      <div class="card-prev"><img src="${url}" alt="战绩卡"></div>`,
+    actions: [
+      { label: '保存战绩图', onClick: () => downloadCard(url, d) },
+      { label: '看今日榜', onClick: showBoard },
+      { label: '返回主线', primary: true, onClick: () => { closeModal(); exitDaily(); renderAll(); route('market'); } },
+    ],
+  });
+}
+
+function openDailyEntry() {
+  const info = dailyInfo();
+  if (S.daily && !S.daily.finished) {
+    const left = dailyLeft();
+    const mm = Math.floor(left / 60000), ss = Math.floor((left % 60000) / 1000);
+    openModal({
+      title: '挑战进行中', sub: `剩余 ${mm}:${String(ss).padStart(2, '0')}`, wide: false,
+      body: `<p class="p-note big">当前净资产 <b class="acid">${fmt(Math.round(netWorth()))}</b> DKC。计时不会因为关掉弹窗而暂停。</p>`,
+      actions: [
+        { label: '回到市场', primary: true, onClick: () => { closeModal(); route('market'); } },
+        { label: '立即结算', onClick: () => { closeModal(); finishDaily(); } },
+      ],
+    });
+    return;
+  }
+  if (info && info.finished && info.date === todayStr()) {
+    const back = !!(S.daily && S.daily.finished);
+    openModal({
+      title: '今日已完成', sub: `#${info.date} · 本机第 ${info.rank || '—'} 名`,
+      body: `<p class="p-note big">今天的成绩：<b class="acid">${fmt(info.score)}</b> DKC。一天只有一局，明天开盘价会换。</p>`,
+      actions: [
+        { label: '看今日榜', primary: true, onClick: showBoard },
+        ...(back ? [{ label: '返回主线', onClick: () => { closeModal(); exitDaily(); renderAll(); route('market'); } }] : []),
+        { label: '关闭', onClick: closeModal },
+      ],
+    });
+    return;
+  }
+  if (info && !info.finished && info.date === todayStr()) {
+    const left = Math.max(0, info.endsAt - Date.now());
+    const mm = Math.floor(left / 60000), ss = Math.floor((left % 60000) / 1000);
+    openModal({
+      title: '继续今日挑战', sub: `剩 ${mm}:${String(ss).padStart(2, '0')}`,
+      body: `<p class="p-note big">上次那一局还没结束。继续会回到当时的存档和计时。</p>`,
+      actions: [
+        { label: '继续', primary: true, onClick: () => { if (resumeDaily()) { closeModal(); renderAll(); route('market'); toast('good', '已回到挑战', '计时继续。'); } } },
+        { label: '放弃这局', onClick: () => { abandonDaily(); closeModal(); renderAll(); toast('info', '已放弃', '明天再来。'); } },
+      ],
+    });
+    return;
+  }
+  openModal({
+    title: '每日挑战', sub: '固定开盘价 · 10 分钟 · 本机榜', wide: false,
+    body: `<p class="p-note">2,500 起步；市场与首轮拍卖由当天日期固定种子生成。10 分钟内把净资产做到最高。主线进度会完整保留，结束后自动回到主线。</p>
+      <p class="p-note">每个自然日一局；同一天重复进入会回到原来的那一局。</p>`,
+    actions: [
+      { label: '开始挑战', primary: true, onClick: () => { closeModal(); startDaily(); renderAll(); route('market'); toast('good', '挑战开始', '10 分钟，计时已启动。'); } },
+      { label: '取消', onClick: closeModal },
+    ],
+  });
+}
+
 function emitHandler(type, payload) {
   if (type === 'notify' && payload) toast(payload.kind, payload.title, payload.text);
   if (type === 'outbid') { toast('warn', '你被反超了', '资金已退回钱包。'); }
   if (type === 'msg') renderTop();
   if (type === 'ending') setTimeout(showEnding, 400);
+  if (type === 'dailyEnd') setTimeout(showDailyResult, 300);
   if (type === 'bid' && view === 'auction') renderAuction();
   if (type === 'contract') { /* toast 已由 engine 发 */ }
   renderRail();
