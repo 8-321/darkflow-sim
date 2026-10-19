@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>暗河 DARKFLOW · 虚构暗网模拟</title>
+<meta name="description" content="暗河 DARKFLOW 是一个纯虚构的暗网市场模拟游戏：倒卖、拍卖、收购公司、管理热度。所有内容由本地生成，不提供任何真实服务。">
+<meta name="theme-color" content="#05070a">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%2305070a'/%3E%3Ccircle cx='16' cy='16' r='9' fill='none' stroke='%239dff3c' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='3' fill='%239dff3c'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<canvas id="rain" aria-hidden="true"></canvas>
+<div id="crt-overlay" aria-hidden="true"></div>
+
+<div id="app">
+  <header id="topbar">
+    <div class="brand">
+      <div class="onion-mark">◉</div>
+      <div class="brand-text"><b>DARKFLOW</b><span>暗河市场</span></div>
+      <span class="sim">SIMULATION</span>
+    </div>
+    <div class="top-meta">
+      <button id="addr" class="addr" title="复制虚构地址">darkflow7kx9q2vz4m8w.onion</button>
+      <span class="sep">/</span>
+      <span id="clock" class="mono">第01天 09:00</span>
+      <span class="sep">/</span>
+      <span id="online" class="mono"></span>
+    </div>
+    <div class="top-stats">
+      <div class="stat cred"><label>余额</label><div class="val"><b id="credits">2,500</b><i>DKC</i></div></div>
+      <div class="stat rep"><label>声望</label><b id="rep">12</b></div>
+      <div class="stat heat" id="heatBox"><label>热度</label><div class="heatbar"><i id="heatFill"></i></div><b id="heatVal">8</b></div>
+      <div class="topbtns">
+        <button id="btnSound" title="音效开关" aria-label="音效">♪</button>
+        <button id="btnCrt" title="扫描线" aria-label="扫描线">▤</button>
+        <button id="btnFx" title="减少动效" aria-label="减少动效">≈</button>
+        <button id="btnHelp" title="操作手册" aria-label="帮助">?</button>
+      </div>
+    </div>
+  </header>
+
+  <div id="shell">
+    <nav id="side">
+      <div class="nav-id"><span>@</span><b id="ident">null_pointer</b><i>BROKER</i></div>
+      <button data-view="market"><span class="ic">▤</span><span class="nm">市场</span><i class="en">MARKET</i></button>
+      <button data-view="auction"><span class="ic">◷</span><span class="nm">拍卖</span><i class="en">AUCTION</i></button>
+      <button data-view="cargo" id="navCargo"><span class="ic">▣</span><span class="nm">货舱</span><i class="en">CARGO</i><b class="badge hide">0</b></button>
+      <button data-view="wallet"><span class="ic">ⓓ</span><span class="nm">钱包</span><i class="en">WALLET</i></button>
+      <button data-view="assets"><span class="ic">◎</span><span class="nm">资产</span><i class="en">ASSETS</i></button>
+      <button data-view="messages" id="navMsg"><span class="ic">✉</span><span class="nm">消息</span><i class="en">MESSAGES</i><b class="badge hide">0</b></button>
+      <button data-view="terminal"><span class="ic">›_</span><span class="nm">终端</span><i class="en">TERMINAL</i></button>
+      <button data-view="profile"><span class="ic">◉</span><span class="nm">档案</span><i class="en">PROFILE</i></button>
+      <div class="side-foot">
+        <div class="sf-row"><span>节点 3/3</span><i class="led"></i></div>
+        <div class="sf-row mini"><span>延迟 <span id="lat">214</span>ms</span><span>TOR</span></div>
+        <div class="sf-fine">本页不连接任何真实网络</div>
+      </div>
+    </nav>
+
+    <main id="view"></main>
+
+    <aside id="rail"></aside>
+  </div>
+
+  <footer id="statusbar">
+    <span class="sb-left">› 状态：已连接 · 三跳电路 · 虚构模拟，无真实交易</span>
+    <span class="sb-right">page generated locally · no network · v1.0.0</span>
+  </footer>
+</div>
+
+<div id="toasts" aria-live="polite"></div>
+<div id="modal-root"></div>
+
+<div id="boot">
+  <div class="boot-inner">
+    <div class="boot-grid">
+      <div class="boot-logo">
+        <div class="onion-big">◉</div>
+        <h1>暗河<span>DARKFLOW</span></h1>
+        <p>一个不存在的市场</p>
+        <div class="boot-meta">
+          <div><label>会话</label><b>LOCAL</b></div>
+          <div><label>节点</label><b>3 / 3</b></div>
+          <div><label>延迟</label><b>214 ms</b></div>
+        </div>
+      </div>
+      <div class="boot-term">
+        <div class="bt-bar"><i></i><i></i><i></i><span>session // local · no uplink</span><b>ENCRYPTED</b></div>
+        <div id="bootOut"></div>
+        <svg id="circuit" viewBox="0 0 320 44" aria-hidden="true">
+          <path class="wire" d="M18 22 H120 M132 22 H200 M212 22 H302"/>
+          <circle class="node" cx="18" cy="22" r="6"/>
+          <circle class="node" cx="126" cy="22" r="6"/>
+          <circle class="node" cx="206" cy="22" r="6"/>
+          <circle class="node" cx="302" cy="22" r="6"/>
+          <text x="18" y="40" text-anchor="middle">YOU</text>
+          <text x="126" y="40" text-anchor="middle">ENTRY</text>
+          <text x="206" y="40" text-anchor="middle">RELAY</text>
+          <text x="302" y="40" text-anchor="middle">EXIT</text>
+        </svg>
+      </div>
+    </div>
+
+    <div id="bootGate">
+      <div class="gate-box">
+        <div class="gate-title">建立新会话</div>
+        <div class="gate-who">&nbsp;</div>
+        <label class="gate-label" for="bootAlias">你的代号</label>
+        <input id="bootAlias" maxlength="16" autocomplete="off" spellcheck="false" placeholder="例如 null_pointer">
+        <label class="gate-check">
+          <input type="checkbox" id="bootAgree">
+          <span>我已知晓：这是<b>虚构模拟游戏</b>。所有商品、人物、交易均为程序生成，不提供任何真实商品、服务、联系人或访问方式。</span>
+        </label>
+        <div class="gate-actions">
+          <button class="btn primary enter">进入暗河</button>
+          <button class="btn resume hide">继续上次会话</button>
+        </div>
+        <div class="gate-fine">不要在这里填写任何真实个人信息 · 进度仅保存在本机</div>
+      </div>
+    </div>
+
+    <button id="bootSkip" class="skip">跳过开机动画 ›</button>
+  </div>
+</div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
