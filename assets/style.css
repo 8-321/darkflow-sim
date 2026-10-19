@@ -969,3 +969,11 @@ body.heat-danger #app::after { box-shadow: inset 0 0 180px rgba(255, 75, 75, .32
 .lg-row b { color: var(--fg); font-weight: 500; }
 .lg-row b.red { color: var(--red); }
 @media (max-width: 860px) { .debt-grid { grid-template-columns: 1fr; gap: 20px; } .dq-amount { font-size: 28px; } }
+
+/* ── 左栏账本 ─────────────────────────────────────────── */
+.ledger-panel { padding-bottom: 8px; }
+.lg-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 7px 10px 0; font: 10.5px var(--mono); color: var(--dim2); }
+.lg-row b { color: var(--fg2); font-weight: 500; white-space: nowrap; }
+.lg-row b.red { color: #ff5a4d; }
+.mini-bar { height: 2px; background: #101820; margin: 9px 10px 2px; }
+.mini-bar i { display: block; height: 100%; background: var(--acid); }
