@@ -3,12 +3,13 @@ import {
   S, fmt, clock, itemDef, vendorOf, catOf, rarityOf, priceDelta, netWorth, inventoryValue,
   buyListing, inspectOrder, resolveFake, sellInv, cancelSell, auctionBid, snipe, refundAuction,
   buyCompany, companyCost, companiesOwned, mix, newIdentity, resolveEvent, markMsgsRead, unread,
-  contractProgress, retire, triggerEnding, crackReward, cleanReward, subscribe, save, wipe, newGame, load, pushMsg,
+  contractProgress, retire, triggerEnding, crackReward, cleanReward, subscribe, save, wipe, newGame, load, pushMsg, exportCode, importCode,
   tick, aiAuctionTick,
 } from './engine.js';
 import { CATS, RARITY, VENDORS, COMPANIES, CONTRACTS, NPCS, ACHIEVEMENTS, BROADCASTS, TERMINAL_HELP, META, FLAVOR, AUCTION_POOL, ITEMS } from './data.js';
 import { initAudio, sfx, setSound } from './audio.js';
 import { crackGame, cleanGame, snipeGame } from './minigames.js';
+import { drawShareCard } from './sharecard.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -978,12 +979,76 @@ function renderProfile() {
         <label class="sw"><input type="checkbox" id="setCrt" ${S.settings.crt ? 'checked' : ''}><span>CRT 扫描线</span></label>
         <label class="sw"><input type="checkbox" id="setFx" ${S.settings.fx ? 'checked' : ''}><span>减少动效</span></label>
       </div>
+      <div class="save-tools">
+        <button class="btn sm" id="btnShareCard">生成行情卡</button>
+        <button class="btn sm" id="btnExportCode">导出存档码</button>
+        <button class="btn sm" id="btnImportCode">导入存档码</button>
+      </div>
       <div class="save-info">存档：localStorage · 上次保存 ${S.lastSaved ? new Date(S.lastSaved).toLocaleTimeString('zh-CN') : '—'} · 版本 ${META.version}</div>
     </section>`;
 
   $('#setSound').onchange = (e) => { S.settings.sound = e.target.checked; setSound(e.target.checked); save(); };
   $('#setCrt').onchange = (e) => { S.settings.crt = e.target.checked; document.body.classList.toggle('no-crt', !e.target.checked); save(); };
   $('#setFx').onchange = (e) => { S.settings.fx = e.target.checked; document.body.classList.toggle('reduce-motion', e.target.checked); save(); };
+  $('#btnShareCard').onclick = () => {
+    const cv = drawShareCard(S, META, clock, fmt, netWorth, itemDef);
+    const url = cv.toDataURL('image/png');
+    openModal({
+      title: '今日行情卡', sub: '1080 × 1350 · 可直接发群', wide: true,
+      body: `<div class="card-prev"><img src="${url}" alt="行情卡预览"></div>
+        <p class="p-note">图上只有代号与虚构数据，不含任何真实信息。</p>`,
+      actions: [
+        { label: '保存 PNG', primary: true, onClick: () => {
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `darkflow-${S.alias}-d${String(clock().day).padStart(2, '0')}.png`;
+          document.body.appendChild(a); a.click(); a.remove();
+          toast('good', '已保存', '在下载目录里。');
+        } },
+        { label: '关闭', onClick: closeModal },
+      ],
+    });
+  };
+
+  $('#btnExportCode').onclick = () => {
+    const code = exportCode();
+    openModal({
+      title: '导出存档码', sub: `${code.length} 字符 · 本机生成`, wide: true,
+      body: `<p class="p-note">整段复制，存到备忘录或发给自己。换设备时贴回即可继续。存档码包含全部进度，不要公开发。</p>
+        <textarea class="save-code" readonly>${esc(code)}</textarea>`,
+      actions: [
+        { label: '复制', primary: true, onClick: () => {
+          const ta = $('.save-code');
+          const done = () => toast('good', '已复制', '粘贴到备忘录保存。');
+          if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(code).then(done).catch(() => { ta.select(); document.execCommand('copy'); done(); });
+          else { ta.select(); document.execCommand('copy'); done(); }
+        } },
+        { label: '关闭', onClick: closeModal },
+      ],
+    });
+    setTimeout(() => { const ta = $('.save-code'); if (ta) { ta.focus(); ta.select(); } }, 80);
+  };
+
+  $('#btnImportCode').onclick = () => {
+    openModal({
+      title: '导入存档码', sub: '会覆盖当前进度', wide: true,
+      body: `<p class="p-note">把之前导出的整段文本贴进来。导入前请先导出当前进度，否则会被覆盖。</p>
+        <textarea class="save-code" id="importCodeBox" placeholder="DF1-XXXXXXXX-..."></textarea>
+        <div class="save-err" id="saveErr"></div>`,
+      actions: [
+        { label: '导入', primary: true, onClick: () => {
+          const r = importCode($('#importCodeBox').value);
+          if (!r.ok) { $('#saveErr').textContent = r.msg; return; }
+          closeModal();
+          renderAll();
+          toast('good', '存档已载入', `@${r.alias} · ${new Date(r.at).toLocaleString('zh-CN')}`);
+        } },
+        { label: '取消', onClick: closeModal },
+      ],
+    });
+    setTimeout(() => $('#importCodeBox')?.focus(), 80);
+  };
+
   $('#retireBtn').onclick = () => openModal({
     title: '金盆洗手？', sub: '按净资产结算', body: `<p class="p-note big">你会带着现有的钱离开暗河。没有结局过场，只有一张账单。</p>`,
     actions: [{ label: '结算', primary: true, onClick: () => { closeModal(); retire(); showEnding(); } }, { label: '再干一会', onClick: closeModal }],

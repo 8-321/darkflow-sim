@@ -115,6 +115,59 @@ export function load() {
 
 export function wipe() { localStorage.removeItem(SAVE_KEY); }
 
+// ── 存档码（离线迁移 / 私域分享） ─────────────────────────
+const b64enc = (str) => {
+  const bytes = new TextEncoder().encode(str);
+  let bin = '';
+  const CH = 0x8000;
+  for (let i = 0; i < bytes.length; i += CH) bin += String.fromCharCode(...bytes.subarray(i, i + CH));
+  return btoa(bin);
+};
+const b64dec = (b64) => {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+};
+function fnv1a(str) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = (h * 0x01000193) >>> 0;
+  }
+  return h.toString(16).toUpperCase().padStart(8, '0');
+}
+
+export function exportCode() {
+  const body = JSON.stringify({ k: 'DF1', v: 1, at: Date.now(), s: S });
+  return `DF1-${fnv1a(body)}-${b64enc(body)}`;
+}
+
+export function importCode(input) {
+  const raw = String(input || '').trim().replace(/\s+/g, '');
+  const m = raw.match(/^DF1-([0-9A-F]{8})-(.+)$/);
+  if (!m) return { ok: false, msg: '格式不正确：应以 DF1- 开头' };
+  let body;
+  try { body = b64dec(m[2]); } catch (e) { return { ok: false, msg: '编码无法解析，可能复制不完整' }; }
+  if (fnv1a(body) !== m[1]) return { ok: false, msg: '校验失败：存档码被截断或改动过' };
+  let data;
+  try { data = JSON.parse(body); } catch (e) { return { ok: false, msg: '内容损坏' }; }
+  if (!data || data.k !== 'DF1' || !data.s || data.s.version !== 1) return { ok: false, msg: '版本不兼容' };
+  const st = data.s;
+  for (const k of ['market', 'auctions', 'inv', 'orders', 'sellOrders', 'log', 'achievements', 'companies', 'settings', 'stats']) {
+    if (st[k] == null) return { ok: false, msg: `字段缺失：${k}` };
+  }
+  Object.keys(S).forEach((k) => { delete S[k]; });
+  Object.assign(S, st);
+  if (!S.market.length) buildMarket();
+  if (!S.auctions.length) seedAuctions();
+  S.pendingEvent = null;
+  save();
+  emit('change');
+  return { ok: true, at: data.at, alias: S.alias };
+}
+
+
 // ── 市场生成 ────────────────────────────────────────────
 function buildMarket() {
   S.market = ITEMS.map((def) => {
