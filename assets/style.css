@@ -854,3 +854,30 @@ body.heat-danger #app::after { box-shadow: inset 0 0 180px rgba(255, 75, 75, .32
 .item .btn.primary { background: transparent; color: var(--acid); border-color: rgba(157,255,60,.38); }
 .item .btn.primary:hover { background: var(--acid); color: #060a08; border-color: var(--acid); }
 .item .btn.primary:disabled { background: transparent; color: var(--dim2); border-color: var(--line); }
+
+/* 主按钮禁用态：透明化，避免亮色误导可点 */
+.btn.primary:disabled, .btn.primary[disabled] {
+  background: transparent !important; color: var(--dim2) !important;
+  border-color: var(--line) !important; opacity: 1 !important; filter: none;
+}
+
+/* 移动端顶栏：三行网格，避免挤压截断 */
+@media (max-width: 860px) {
+  #topbar {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "brand btns" "meta meta" "stats stats";
+    align-items: center; gap: 7px 8px; padding: 8px 12px;
+  }
+  .brand { grid-area: brand; min-width: 0; }
+  .brand-text span { display: none; }
+  .topbtns { grid-area: btns; justify-self: end; }
+  .top-meta { grid-area: meta; width: 100%; min-width: 0; overflow: hidden; gap: 6px; }
+  .addr { flex: 1 1 auto; min-width: 0; max-width: none; }
+  .top-stats { grid-area: stats; margin: 0; width: 100%; justify-content: space-between; gap: 6px; }
+  .stat { min-width: 0; gap: 4px; }
+  .stat label { font-size: 7px; }
+  .stat.cred b { font-size: 14px; }
+  .stat.heat .heatbar { width: 34px; }
+  #statusbar { display: none; }
+  .empty-cta { padding: 24px 16px; }
+}

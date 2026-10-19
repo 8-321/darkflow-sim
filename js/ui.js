@@ -385,7 +385,7 @@ function renderAuction() {
   $('#view').innerHTML = `
     <div class="view-head">
       <div class="vh-left"><h1>拍卖行 <span class="en">AUCTION</span></h1>
-        <p class="sub">3 件同时竞拍 · 最后 3 秒可压哨 · 赢拍后立刻入库。</p></div>
+        <p class="sub">3 件同时竞拍 · 最后 9 秒可压哨 · 赢拍后立刻入库。</p></div>
       <div class="vh-tools"><div class="wallet-pill">可用 ${fmt(S.credits)} DKC${heldSum ? ` · 冻结 ${fmt(heldSum)}` : ''}</div></div>
     </div>
     <div class="grid auctions">${cards || '<div class="empty">暂无拍品，正在上架…</div>'}</div>
@@ -813,6 +813,25 @@ function runCommand(raw) {
       renderAll(); break;
     }
     case 'wallet': termOut(`余额 ${fmt(S.credits)} DKC · 净资产 ${fmt(netWorth())} · 地址 ${S.walletAddr || '未生成'}`); break;
+    case 'status':
+      termOut(`余额 ${fmt(S.credits)} DKC · 净资产 ${fmt(netWorth())} · 热度 ${Math.round(S.heat)}/100 · 声望 ${Math.round(S.rep)}/100 · 在途 ${S.orders.filter((o) => o.status === 'transit' || o.status === 'arrived').length} · 库存 ${S.inv.reduce((n, i) => n + i.qty, 0)}`);
+      break;
+    case 'orders': {
+      const os = S.orders.filter((o) => o.status === 'transit' || o.status === 'arrived');
+      if (!os.length) { termOut('没有在途包裹。'); break; }
+      os.forEach((o) => {
+        const d = itemDef(o.defId);
+        const left = Math.max(0, o.eta - Date.now());
+        termOut(`  ${d.code.padEnd(12)} ${o.status === 'arrived' ? '待验货' : `ETA ${Math.ceil(left / 60000)} 分钟`}  ${fmt(o.price)} DKC`);
+      });
+      break;
+    }
+    case 'netstat':
+      termOut('  relay-01   10.0.0.4    12ms   OK');
+      termOut('  relay-02   10.0.0.9    38ms   OK');
+      termOut('  exit-03    10.0.0.21   61ms   OK');
+      termOut('  3/3 跳 · 出口位于虚构节点 · 无真实连接');
+      break;
     case 'mix': {
       const r = mix(+a || 0);
       termOut(r.ok ? `混币完成 · 手续费 ${fmt(r.fee)} · 热度 -${r.drop.toFixed(1)}${r.contaminated ? ' · 污染，损失 ' + fmt(r.lost) : ''}` : `失败：${r.msg}`, r.ok ? 'ok' : 'err');
