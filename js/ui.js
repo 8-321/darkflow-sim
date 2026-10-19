@@ -6,8 +6,9 @@ import {
   contractProgress, retire, triggerEnding, crackReward, cleanReward, subscribe, save, wipe, newGame, load, pushMsg, exportCode, importCode,
   tick, aiAuctionTick,
   startDaily, resumeDaily, dailyInfo, dailyBoard, dailyLeft, finishDaily, exitDaily, abandonDaily, checkDaily, todayStr,
+  debtInfo, medInfo, payInstallment, settleDebt, daysLeft, dueLabel,
 } from './engine.js';
-import { CATS, RARITY, VENDORS, COMPANIES, CONTRACTS, NPCS, ACHIEVEMENTS, BROADCASTS, TERMINAL_HELP, META, FLAVOR, AUCTION_POOL, ITEMS } from './data.js';
+import { CATS, RARITY, VENDORS, COMPANIES, CONTRACTS, NPCS, ACHIEVEMENTS, BROADCASTS, TERMINAL_HELP, META, FLAVOR, AUCTION_POOL, ITEMS, STORY, ENDINGS } from './data.js';
 import { initAudio, sfx, setSound } from './audio.js';
 import { crackGame, cleanGame, snipeGame } from './minigames.js';
 import { drawShareCard } from './sharecard.js';
@@ -185,8 +186,17 @@ function renderRail() {
       <button class="btn sm ${canResume ? 'primary' : ''}" id="railDaily">${canResume ? '继续挑战' : '开始挑战'}</button>
     </section>`;
   }
+  const din = debtInfo();
+  const min = medInfo();
+  const debtBlock = `<section class="panel ledger-panel">
+      <div class="panel-head"><span>账本</span><span class="mini ${din.cleared ? '' : 'red'}">${din.cleared ? 'CLEAR' : 'DUE'}</span></div>
+      <div class="lg-row"><span>月供</span><b class="${!din.cleared && din.days <= 1 ? 'red' : ''}">${din.cleared ? '已结清' : `${fmt(din.installment)} · ${din.days === 0 ? '今天' : din.days + ' 天'}`}</b></div>
+      <div class="lg-row"><span>药</span><b class="${min.days <= 1 ? 'red' : ''}">${fmt(min.cost)} · ${min.days === 0 ? '今天' : min.days + ' 天'}</b></div>
+      <div class="mini-bar"><i style="width:${din.cleared ? 100 : Math.max(3, (1 - din.left / STORY.debt.periods) * 100)}%"></i></div>
+    </section>`;
   rail.innerHTML = `
     ${dailyBlock}
+    ${debtBlock}
     <section class="panel">
       <div class="panel-head"><span>实时广播</span><i class="live"></i></div>
       <div class="feed">${feed}</div>
@@ -648,10 +658,37 @@ function openSell(uid) {
 function renderWallet() {
   if (!S.walletAddr) { S.walletAddr = 'dk1' + Array.from({ length: 34 }, () => '0123456789abcdefghjkmnpqrstuvwxyz'[Math.floor(Math.random() * 32)]).join(''); save(); }
   const txs = S.log.filter((l) => l.delta).slice(0, 18);
+  const din = debtInfo();
+  const min = medInfo();
   const idCost = Math.round(5000 * Math.pow(2.2, S.stats.ids));
   $('#view').innerHTML = `
     <div class="view-head"><div class="vh-left"><h1>钱包 <span class="en">WALLET</span></h1>
       <p class="sub">暗币 DKC · 本地台账 · 不可提现，也没有地方可提。</p></div></div>
+    <section class="panel debt-panel">
+      <div class="panel-head"><span>账本 / DEBT</span><span class="mini ${din.cleared ? '' : 'red'}">${din.cleared ? '已结清' : '灰账 · 高利贷'}</span></div>
+      <div class="debt-grid">
+        <div class="debt-col">
+          <div class="dq-label">${din.cleared ? '债务' : '下期扣款'}</div>
+          <div class="dq-amount">${din.cleared ? '0' : fmt(din.installment)}<i>DKC</i></div>
+          <div class="dq-sub">${din.cleared ? '灰账已结清 · 没有人会再来找你' : `第 ${STORY.debt.periods - din.left + 1} / ${STORY.debt.periods} 期 · ${din.days === 0 ? '今天' : din.days + ' 天后'}（${dueLabel(din.nextAt)}）`}</div>
+          <div class="dq-bar"><i style="width:${din.cleared ? 100 : Math.max(4, (1 - din.left / STORY.debt.periods) * 100)}%"></i></div>
+          <div class="dq-foot"><span>剩余应还</span><b>${fmt(din.totalLeft)}</b><span>逾期</span><b class="${din.overdue ? 'red' : ''}">${fmt(din.overdue)}</b></div>
+          ${din.cleared ? '<div class="dq-stamp">账已清 · CLEARED</div>' : `<div class="dq-actions">
+            <button class="btn sm" id="payOne" ${S.credits < din.installment ? 'disabled' : ''}>提前还一期</button>
+            <button class="btn sm primary" id="settleAll" ${S.credits < din.settle ? 'disabled' : ''}>结清 ${fmt(din.settle)}</button>
+          </div>`}
+        </div>
+        <div class="debt-col">
+          <div class="dq-label">妹妹的药</div>
+          <div class="dq-amount">${fmt(min.cost)}<i>DKC / 7 天</i></div>
+          <div class="dq-sub">${min.missed ? `已断 ${min.missed} 次 · ` : ''}下次 ${min.days === 0 ? '今天' : min.days + ' 天后'}（${dueLabel(min.nextAt)}）</div>
+          <div class="dq-bar med"><i style="width:${Math.max(4, 100 - Math.min(100, min.days / 7 * 100))}%"></i></div>
+          <div class="dq-foot"><span>已续</span><b>${min.paid} 盒</b><span>欠费</span><b class="${min.missed ? 'red' : ''}">${min.missed} / ${STORY.med.maxMiss}</b></div>
+          <p class="dq-note">${min.missed >= 2 ? '护士站已经打过两次电话。' : '断一次，之前的都白打。'}</p>
+        </div>
+      </div>
+      <p class="debt-foot">${din.cleared ? '灰账不会再扣款。剩下的账，只有药。' : '到期自动扣款；扣不到就记罚息，热度 +10、声望 -5。三次违约，灰账会亲自上门。'}</p>
+    </section>
     <div class="wallet-grid">
       <section class="panel balance-panel">
         <div class="bp-label">可用余额</div>
@@ -684,6 +721,31 @@ function renderWallet() {
       </tbody></table>
     </section>`;
 
+  const payBtn = $('#payOne');
+  if (payBtn) payBtn.onclick = () => {
+    const r = payInstallment();
+    if (!r.ok) { sfx('error'); toast('bad', '还款失败', r.msg); return; }
+    sfx('coin'); toast('good', '已还一期', r.left > 0 ? `剩 ${r.left} 期。` : '债务已结清。');
+    renderAll();
+  };
+  const settleBtn = $('#settleAll');
+  if (settleBtn) settleBtn.onclick = () => {
+    const d2 = debtInfo();
+    openModal({
+      title: '一次结清？', sub: `支付 ${fmt(d2.settle)} DKC`,
+      body: `<p class="p-note big">结清后灰账不会再扣款。比按期还少 ${fmt(d2.totalLeft - d2.settle)}，但从今往后，你只剩自己的账。</p>`,
+      actions: [
+        { label: '结清', primary: true, onClick: () => {
+          const r = settleDebt();
+          closeModal();
+          if (r.ok) { sfx('seal'); toast('good', '债务结清', `支付 ${fmt(r.cost)} DKC。`); }
+          else { sfx('error'); toast('bad', '结清失败', r.msg); }
+          renderAll();
+        } },
+        { label: '再想想', onClick: closeModal },
+      ],
+    });
+  };
   $('#copyAddr').onclick = async () => {
     try { await navigator.clipboard.writeText(S.walletAddr); toast('good', '已复制', '地址只在本机有效。'); }
     catch (e) { toast('warn', '复制失败', '请手动选中复制。'); }
@@ -769,7 +831,7 @@ function renderMessages() {
   markMsgsRead();
   const groups = {};
   S.msgs.forEach((m) => { (groups[m.from] ||= []).push(m); });
-  const order = ['MOTH', 'GHOST', 'KIRA', 'BANKER'];
+  const order = ['LZ', 'ASH', 'MOTH', 'GHOST', 'KIRA', 'BANKER'];
   const roster = Object.entries(NPCS).map(([k, npc]) => {
     const msgs = groups[k] || [];
     const last = msgs[msgs.length - 1];
@@ -791,7 +853,7 @@ function renderMessages() {
       <p class="sub">端到端加密（并不存在）。所有对话都是本地生成的。</p></div></div>
     <div class="msg-grid">
       <div class="threads">${html || '<div class="empty">没有消息。暗河里安静得可怕。</div>'}</div>
-      <aside class="msg-side"><div class="panel-head"><span>联系人</span><span class="mini">${Object.keys(groups).length}/4</span></div>${roster}</aside>
+      <aside class="msg-side"><div class="panel-head"><span>联系人</span><span class="mini">${Object.keys(groups).length}/${Object.keys(NPCS).length}</span></div>${roster}</aside>
     </div>
     <div class="msg-tip">给飞蛾发一条消息：<button class="btn sm" id="askMoth">「最近有什么风声？」</button></div>`;
   $('#askMoth').onclick = () => {
@@ -1150,21 +1212,18 @@ function showEnding() {
   $('#toasts').innerHTML = '';
   closeModal();
   const e = S.ending;
-  const titles = { arrest: '被捕', kingpin: '暗河之主', retire: '金盆洗手' };
+  const end = ENDINGS[e.kind] || ENDINGS.retire;
   const grades = [['S', 500000], ['A', 250000], ['B', 100000], ['C', 40000], ['D', 0]];
-  const grade = e.kind === 'kingpin' ? 'S' : e.kind === 'arrest' ? 'F' : (grades.find(([, v]) => e.worth >= v) || ['D'])[0];
+  const grade = end.grade || (grades.find(([, v]) => e.worth >= v) || ['D'])[0];
+  const epilogue = e.kind === 'retire' && S.debt && S.debt.cleared ? ' 林栀的复查单上写着「完全缓解」。' : '';
   const root = document.createElement('div');
   root.className = 'ending ' + e.kind;
   root.innerHTML = `
     <div class="end-inner">
-      <div class="end-tag">${e.kind === 'arrest' ? 'SESSION TERMINATED' : e.kind === 'kingpin' ? 'ASCENSION' : 'EXIT'}</div>
-      <h1>${titles[e.kind]}</h1>
+      <div class="end-tag">${end.tag}</div>
+      <h1>${end.title}</h1>
       <div class="end-num">${grade}</div>
-      <p class="end-text">${e.kind === 'arrest'
-        ? '门被敲响的时候，你正在核对一笔 4,000 的托管。你没有回头。判决书上的代号拼错了两个字母，但没人会为此上诉。'
-        : e.kind === 'kingpin'
-          ? '你成了暗河里最安静的那个人。所有人都知道你的名字，但没人敢在广播里提起。你终于明白：这不是王座，只是一张更贵的椅子。'
-          : '你关掉终端，把硬盘放进微波炉。第二天早上，你在楼下买了豆浆，第一次觉得阳光有点刺眼。'}</p>
+      <p class="end-text">${end.text}${epilogue}</p>
       <div class="end-stats">${[
         ['净资产', fmt(e.worth) + ' DKC'], ['声望', Math.round(e.rep)], ['存活', Math.floor(e.at / 24) + 1 + ' 天'],
         ['成交', (e.stats.trades || 0) + ' 笔'], ['赢拍', (e.stats.auctionsWon || 0)], ['峰值热度', Math.round(e.stats.peakHeat || 0)],
@@ -1380,6 +1439,30 @@ const BOOT_LINES = [
   ['WARNING: 本环境为虚构模拟，不含任何真实服务。', 14],
 ];
 
+function maybePrologue() {
+  if (savedBoot || document.getElementById('prologue')) return;
+  try { if (localStorage.getItem('darkflow.prologue.v1')) return; } catch (e) { /* ignore */ }
+  const gate = $('#bootGate');
+  gate.classList.remove('in');
+  const el = document.createElement('div');
+  el.id = 'prologue';
+  el.innerHTML = `<div class="pl-inner">
+    <div class="pl-tag">CASE FILE · 未结</div>
+    <div class="pl-lines">${STORY.prologue.map((l, i) => `<p style="animation-delay:${0.4 + i * 1.05}s">${esc(l)}</p>`).join('')}</div>
+    <div class="pl-foot"><button class="btn primary" id="plGo">进入暗河</button><span>全部虚构 · 无真实服务</span></div>
+    <button class="pl-skip" id="plSkip">跳过</button>
+  </div>`;
+  document.body.appendChild(el);
+  const done = () => {
+    try { localStorage.setItem('darkflow.prologue.v1', '1'); } catch (e) { /* ignore */ }
+    el.classList.add('out');
+    setTimeout(() => el.remove(), 360);
+    gate.classList.add('in');
+  };
+  $('#plGo').onclick = done;
+  $('#plSkip').onclick = done;
+}
+
 async function typeBoot() {
   const out = $('#bootOut');
   const fast = !!savedBoot;
@@ -1401,6 +1484,7 @@ async function typeBoot() {
   }
   $('#bootGate').classList.add('in');
   const sk = $('#bootSkip'); if (sk) sk.style.display = 'none';
+  maybePrologue();
 }
 
 let savedBoot = false;
@@ -1428,6 +1512,7 @@ function boot() {
     $('#bootGate').classList.add('in');
     const sk = $('#bootSkip'); if (sk) sk.style.display = 'none';
     sfx('glitch');
+    maybePrologue();
   };
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && $('#boot').classList.contains('show') && !started) {

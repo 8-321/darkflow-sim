@@ -4,7 +4,7 @@
 export const META = {
   title: 'DARKFLOW',
   cn: '暗河',
-  version: '1.2.0',
+  version: '1.3.0',
   addr: 'darkflow7kx9q2vz4m8w.onion',
   currency: 'DKC',
   disclaimer: '虚构模拟 · 无真实交易 · 无真实服务',
@@ -133,6 +133,8 @@ export const NPCS = {
   GHOST: { name: 'GHOST', cn: '幽灵', color: '#59d7ff' },
   KIRA: { name: 'KIRA', cn: '基拉', color: '#ffb64d' },
   BANKER: { name: 'THE_BANKER', cn: '银行家', color: '#c9a4ff' },
+  LZ: { name: 'LZ', cn: '林栀', color: '#ff8fa3' },
+  ASH: { name: 'ASH', cn: '灰账', color: '#ff5a4d' },
 };
 
 export const DIALOGS = {
@@ -308,7 +310,33 @@ export const ACHIEVEMENTS = [
   { id: 'a8', name: '六位数', desc: '净资产超过 100,000' },
   { id: 'a9', name: '静默', desc: '热度降到 5 以下' },
   { id: 'a10', name: '暗河之主', desc: '达成登顶结局' },
+  { id: 'a11', name: '第一期', desc: '按时付清第一期月供' },
+  { id: 'a12', name: '干净', desc: '结清灰账的全部欠款' },
 ];
+
+export const STORY = {
+  sister: { name: '林栀', age: 17, ill: '急性淋巴细胞白血病' },
+  lender: { name: 'ASH', cn: '灰账' },
+  drug: { name: '白舒', cost: 1200, period: '七天一盒' },
+  debt: { principal: 48000, installment: 5200, periods: 12, firstDue: 129, period: 720, penalty: 0.15, maxMiss: 3 },
+  med: { cost: 1200, firstDue: 57, period: 168, maxMiss: 3 },
+  prologue: [
+    '林栀，十七岁。急性淋巴细胞白血病。',
+    '特价药白舒，一盒 1,200，七天一盒。断一次，之前的都白打。',
+    '去年冬天，我在灰账借了 48,000。月供 5,200，十二期。',
+    '今天，离第一期还有五天。',
+    '我没有资源，没有学历，也没有能再借钱的人。',
+    '只剩下一个入口。他们说，这里叫暗河。',
+  ],
+};
+
+export const ENDINGS = {
+  arrest: { title: '被捕', tag: 'SESSION TERMINATED', grade: 'F', text: '门被敲响的时候，你正在核对一笔 4,000 的托管。你没有回头。判决书上的代号拼错了两个字母，但没人会为此上诉。' },
+  kingpin: { title: '暗河之主', tag: 'ASCENSION', grade: 'S', text: '你成了暗河里最安静的那个人。所有人都知道你的名字，但没人敢在广播里提起。你终于明白：这不是王座，只是一张更贵的椅子。' },
+  retire: { title: '金盆洗手', tag: 'EXIT', text: '你关掉终端，把硬盘放进微波炉。第二天早上，你在楼下买了豆浆，第一次觉得阳光有点刺眼。' },
+  liquidated: { title: '清算', tag: 'DEBT COLLECTED', grade: 'F', text: '第三次违约之后，灰账没有来敲门。他们只是把医院的欠费单拍照发给你，然后停了你的入口。你在楼下坐到天亮，手机再没亮过。' },
+  medstop: { title: '药停了', tag: 'TREATMENT STOPPED', grade: 'F', text: '第三盒药没续上。护士站的电话打来时，你正在拍一件货。你说「马上」，然后按了静音。三天后，林栀的病房空了半张床。' },
+};
 
 export const FLAVOR = [
   '本页所有内容均为本地生成。',

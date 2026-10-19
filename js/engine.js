@@ -1,5 +1,5 @@
 // DARKFLOW // 引擎：状态、时间、市场、交易、拍卖、资产、事件
-import { ITEMS, VENDORS, COMPANIES, AUCTION_POOL, EVENTS, CONTRACTS, DIALOGS, CATS, RARITY, ACHIEVEMENTS } from './data.js';
+import { ITEMS, VENDORS, COMPANIES, AUCTION_POOL, EVENTS, CONTRACTS, DIALOGS, CATS, RARITY, ACHIEVEMENTS, STORY } from './data.js';
 
 const SAVE_KEY = 'darkflow.save.v1';
 const DAILY_KEY = 'darkflow.daily.v1';
@@ -60,6 +60,11 @@ export const S = {
   settings: { sound: true, crt: true, fx: true },
   ending: null,
   pendingEvent: null,
+  debt: {
+    principal: STORY.debt.principal, left: STORY.debt.periods, paid: 0, overdue: 0, missed: 0,
+    nextAt: STORY.debt.firstDue, cleared: false,
+  },
+  med: { cost: STORY.med.cost, paid: 0, missed: 0, nextAt: STORY.med.firstDue },
   lastSaved: 0,
   broadcast: [],
   seen: {},
@@ -101,6 +106,11 @@ export function newGame(alias) {
     settings: S.settings,
     ending: null,
     pendingEvent: null,
+    debt: {
+      principal: STORY.debt.principal, left: STORY.debt.periods, paid: 0, overdue: 0, missed: 0,
+      nextAt: STORY.debt.firstDue, cleared: false,
+    },
+    med: { cost: STORY.med.cost, paid: 0, missed: 0, nextAt: STORY.med.firstDue },
     broadcast: [],
     seen: {},
   });
@@ -109,6 +119,10 @@ export function newGame(alias) {
   S.log.unshift({ t: Date.now(), type: 'sys', text: '会话建立 · 三跳电路就绪', delta: 0 });
   pushMsg('MOTH', '你能看见这行字，说明你的入口节点还没被标记。很好。');
   setTimeout(() => pushMsg('MOTH', '我是飞蛾。这里叫暗河。先从一单小生意开始——市场里三位数的货，随便挑一件。'), 4000);
+  if (slotKey === SAVE_KEY) {
+    setTimeout(() => pushMsg('LZ', '哥，今天抽血了。护士说下周还要一盒白舒。'), 6000);
+    setTimeout(() => pushMsg('ASH', '48,000，十二期，每期 5,200。第 6 天 09:00 是第一期。别让我上门。'), 7600);
+  }
   save();
   emit('new');
 }
@@ -130,6 +144,8 @@ export function load() {
     Object.assign(S, data);
     if (!S.market || !S.market.length) buildMarket();
     if (!S.auctions || !S.auctions.length) seedAuctions();
+    if (!S.debt) S.debt = { principal: STORY.debt.principal, left: STORY.debt.periods, paid: 0, overdue: 0, missed: 0, nextAt: S.hour + 120, cleared: false };
+    if (!S.med) S.med = { cost: STORY.med.cost, paid: 0, missed: 0, nextAt: S.hour + 48 };
     return true;
   } catch (e) { return false; }
 }
@@ -278,6 +294,8 @@ export function importCode(input) {
   Object.keys(S).forEach((k) => { delete S[k]; });
   Object.assign(S, st);
   if (!S.market.length) buildMarket();
+  if (!S.debt) S.debt = { principal: STORY.debt.principal, left: STORY.debt.periods, paid: 0, overdue: 0, missed: 0, nextAt: S.hour + 120, cleared: false };
+  if (!S.med) S.med = { cost: STORY.med.cost, paid: 0, missed: 0, nextAt: S.hour + 48 };
   if (!S.auctions.length) seedAuctions();
   S.pendingEvent = null;
   save();
@@ -869,6 +887,55 @@ export function crackReward() {
   return { gain, def: d };
 }
 
+// ── 债务 / 药费 ─────────────────────────────────────────
+export const daysLeft = (at) => Math.max(0, Math.ceil((at - S.hour) / 24));
+export const dueLabel = (at) => `第 ${String(Math.floor(at / 24) + 1).padStart(2, '0')} 天 ${String(at % 24).padStart(2, '0')}:00`;
+export function debtInfo() {
+  const d = S.debt || {};
+  const inst = STORY.debt.installment;
+  return {
+    installment: inst, left: d.left || 0, paid: d.paid || 0, overdue: d.overdue || 0, missed: d.missed || 0,
+    cleared: !!d.cleared, nextAt: d.nextAt || 0, days: daysLeft(d.nextAt || 0),
+    totalLeft: d.cleared ? 0 : (d.left || 0) * inst + (d.overdue || 0),
+    settle: d.cleared ? 0 : Math.round((d.left || 0) * inst * 0.92 + (d.overdue || 0)),
+  };
+}
+export function medInfo() {
+  const m = S.med || {};
+  return { cost: m.cost || STORY.med.cost, paid: m.paid || 0, missed: m.missed || 0, nextAt: m.nextAt || 0, days: daysLeft(m.nextAt || 0) };
+}
+
+export function payInstallment() {
+  const d = S.debt;
+  if (d.cleared) return { ok: false, msg: '已经结清了。' };
+  const inst = STORY.debt.installment;
+  if (S.credits < inst) return { ok: false, msg: `余额不够这一期，还差 ${fmt(inst - S.credits)}。` };
+  S.credits -= inst; d.paid += inst; d.left -= 1;
+  d.nextAt = S.hour + STORY.debt.period;
+  pushLog('debt', `提前还一期 -${fmt(inst)} · 剩 ${d.left} 期`, -inst);
+  if (d.left <= 0) clearDebt();
+  else { pushMsg('ASH', `提前还的一期收到了。剩 ${d.left} 期。`); award('a11'); }
+  save(); emit('change');
+  return { ok: true, left: d.left };
+}
+export function settleDebt() {
+  const info = debtInfo();
+  if (info.cleared) return { ok: false, msg: '已经结清了。' };
+  if (S.credits < info.settle) return { ok: false, msg: `还差 ${fmt(info.settle - S.credits)}。` };
+  S.credits -= info.settle;
+  S.debt.paid += info.settle;
+  clearDebt();
+  save(); emit('change');
+  return { ok: true, cost: info.settle };
+}
+function clearDebt() {
+  S.debt.cleared = true; S.debt.left = 0; S.debt.nextAt = 0;
+  pushLog('debt', '灰账结清 · 债务清零', 0);
+  pushMsg('ASH', '账清了。以后别再让我看见你的代号。');
+  pushMsg('LZ', '哥，今天医生说了「完全缓解」。我们可以回家了。');
+  award('a12');
+}
+
 // ── 主循环 ──────────────────────────────────────────────
 export function tick(hours = 1) {
   if (S.ending) return;
@@ -882,6 +949,8 @@ export function tick(hours = 1) {
     addHeat(-0.15);
     S.rep = clamp(S.rep + 0.02, 0, 100);
     maybeEvent();
+    debtTick();
+    medTick();
     if (S.heat >= 100) { triggerEnding('arrest'); break; }
   }
   if (netWorth() >= 500000 && S.rep >= 80 && !S.ending) triggerEnding('kingpin');
@@ -892,6 +961,50 @@ export function tick(hours = 1) {
     pushMsg('GHOST', '你的热度到 60 了。现在开始，每一次大额交易都像是在黑暗里点火。去洗币，或者换个身份。');
   }
   save(); emit('tick');
+}
+
+function debtTick() {
+  const d = S.debt;
+  if (!d || d.cleared || S.ending) return;
+  if (S.hour < d.nextAt) return;
+  const inst = STORY.debt.installment;
+  if (S.credits >= inst) {
+    S.credits -= inst; d.paid += inst; d.left -= 1; d.nextAt += STORY.debt.period;
+    pushLog('debt', `月供自动扣款 -${fmt(inst)} · 剩 ${d.left} 期`, -inst);
+    pushMsg('ASH', `第 ${STORY.debt.periods - d.left} 期已扣。剩 ${d.left} 期。`);
+    award('a11');
+    if (d.left <= 0) clearDebt();
+  } else {
+    const pen = Math.round(inst * STORY.debt.penalty);
+    d.overdue += inst + pen; d.missed += 1; d.nextAt += STORY.debt.period;
+    addHeat(10); S.rep = clamp(S.rep - 5, 0, 100);
+    pushLog('debt', `月供违约 · 罚息 ${fmt(pen)} 已记`, 0);
+    pushMsg('ASH', `第 ${d.missed} 次没扣到。罚息 ${fmt(pen)}。别让我去她医院。`);
+    if (d.missed >= STORY.debt.maxMiss) triggerEnding('liquidated');
+  }
+}
+
+function medTick() {
+  const m = S.med;
+  if (!m || S.ending) return;
+  if (S.hour < m.nextAt) return;
+  if (S.credits >= m.cost) {
+    S.credits -= m.cost; m.paid += 1; m.nextAt += STORY.med.period;
+    pushLog('med', `续药 -${fmt(m.cost)} · ${STORY.drug.name}`, -m.cost);
+    if (m.paid === 1) pushMsg('LZ', '药拿到了。哥，你别太晚睡。');
+  } else {
+    m.missed += 1; m.nextAt += STORY.med.period;
+    pushLog('med', `药费不足 · 欠 ${fmt(m.cost)}`, 0);
+    pushMsg('LZ', '哥，药停了。医生说不能停。');
+    if (m.missed >= STORY.med.maxMiss) triggerEnding('medstop');
+  }
+}
+
+function award(id) {
+  if (S.achievements.includes(id)) return;
+  S.achievements.push(id);
+  const a = ACHIEVEMENTS.find((x) => x.id === id);
+  emit('notify', { kind: 'good', title: '成就解锁', text: a ? a.name : id });
 }
 
 export function pushMsg(from, text) {
