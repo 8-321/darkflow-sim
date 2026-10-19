@@ -12,6 +12,7 @@
 | ![拍卖](docs/shot-auction.png) | ![移动端](docs/shot-mobile.png) |
 | ![每日挑战战绩卡](docs/shot-daily.png) | ![移动端挑战结算](docs/shot-daily-mobile.png) |
 | ![序章](docs/shot-prologue.png) | ![账本](docs/shot-debt.png) |
+| ![结局·清算](docs/shot-ending-debt.png) | ![移动端账本](docs/shot-debt-mobile.png) |
 
 **分享卡**：档案 → 生成行情卡，直接导出 1080×1350 PNG。
 
