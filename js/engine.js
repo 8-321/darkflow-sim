@@ -68,6 +68,7 @@ export const S = {
   lastSaved: 0,
   broadcast: [],
   seen: {},
+  story: { chapter: 1, seen: {} },
 };
 
 const listeners = new Set();
@@ -113,6 +114,7 @@ export function newGame(alias) {
     med: { cost: STORY.med.cost, paid: 0, missed: 0, nextAt: STORY.med.firstDue },
     broadcast: [],
     seen: {},
+    story: { chapter: 1, seen: {} },
   });
   buildMarket();
   seedAuctions();
@@ -146,6 +148,7 @@ export function load() {
     if (!S.auctions || !S.auctions.length) seedAuctions();
     if (!S.debt) S.debt = { principal: STORY.debt.principal, left: STORY.debt.periods, paid: 0, overdue: 0, missed: 0, nextAt: S.hour + 120, cleared: false };
     if (!S.med) S.med = { cost: STORY.med.cost, paid: 0, missed: 0, nextAt: S.hour + 48 };
+    if (!S.story) S.story = { chapter: 1, seen: {} };
     return true;
   } catch (e) { return false; }
 }
@@ -296,6 +299,7 @@ export function importCode(input) {
   if (!S.market.length) buildMarket();
   if (!S.debt) S.debt = { principal: STORY.debt.principal, left: STORY.debt.periods, paid: 0, overdue: 0, missed: 0, nextAt: S.hour + 120, cleared: false };
   if (!S.med) S.med = { cost: STORY.med.cost, paid: 0, missed: 0, nextAt: S.hour + 48 };
+  if (!S.story) S.story = { chapter: 1, seen: {} };
   if (!S.auctions.length) seedAuctions();
   S.pendingEvent = null;
   save();
@@ -769,7 +773,7 @@ export function maybeEvent() {
     }
   }
   if (h % 3 === 0) {
-    const pool = EVENTS.filter((e) => e.id !== 'raid' && S.heat >= (e.minHeat || 0));
+    const pool = EVENTS.filter((e) => e.id !== 'raid' && S.heat >= (e.minHeat || 0) && (S.debt ? S.debt.missed >= (e.minMissed || 0) : !e.minMissed));
     const total = pool.reduce((s, e) => s + e.weight, 0);
     if (rand() < 0.26) {
       let r = rand() * total;
@@ -790,6 +794,8 @@ export function resolveEvent(choiceIndex) {
   if (e.rep) { S.rep = clamp(S.rep + e.rep, 0, 100); }
   if (e.heat) { addHeat(e.heat); }
   if (e.flag) S.flags[e.flag] = true;
+  if (e.debtOverdue) S.debt.overdue = Math.max(0, S.debt.overdue + e.debtOverdue);
+  if (e.debtPenalty) { S.debt.overdue += e.debtPenalty; pushLog('debt', `灰账追加欠款 +${fmt(e.debtPenalty)}`, 0); }
   if (e.riskRaid) {
     S.stats.raids++;
     if (rand() < 0.45) {
@@ -915,7 +921,7 @@ export function payInstallment() {
   pushLog('debt', `提前还一期 -${fmt(inst)} · 剩 ${d.left} 期`, -inst);
   if (d.left <= 0) clearDebt();
   else { pushMsg('ASH', `提前还的一期收到了。剩 ${d.left} 期。`); award('a11'); }
-  save(); emit('change');
+  save(); emit('change'); storyTick();
   return { ok: true, left: d.left };
 }
 export function settleDebt() {
@@ -931,8 +937,10 @@ export function settleDebt() {
 function clearDebt() {
   S.debt.cleared = true; S.debt.left = 0; S.debt.nextAt = 0;
   pushLog('debt', '灰账结清 · 债务清零', 0);
-  pushMsg('ASH', '账清了。以后别再让我看见你的代号。');
-  pushMsg('LZ', '哥，今天医生说了「完全缓解」。我们可以回家了。');
+  pushMsg('ASH', STORY.beats.cleared);
+  pushMsg('LZ', STORY.beats.clearedSis);
+  if (!S.story) S.story = { chapter: 1, seen: {} };
+  if (S.story.chapter < 4) { S.story.chapter = 4; emit('chapter', STORY.chapters[4]); }
   award('a12');
 }
 
@@ -951,6 +959,7 @@ export function tick(hours = 1) {
     maybeEvent();
     debtTick();
     medTick();
+    storyTick();
     if (S.heat >= 100) { triggerEnding('arrest'); break; }
   }
   if (netWorth() >= 500000 && S.rep >= 80 && !S.ending) triggerEnding('kingpin');
@@ -971,7 +980,9 @@ function debtTick() {
   if (S.credits >= inst) {
     S.credits -= inst; d.paid += inst; d.left -= 1; d.nextAt += STORY.debt.period;
     pushLog('debt', `月供自动扣款 -${fmt(inst)} · 剩 ${d.left} 期`, -inst);
-    pushMsg('ASH', `第 ${STORY.debt.periods - d.left} 期已扣。剩 ${d.left} 期。`);
+    if (d.left === STORY.debt.periods - 1 && once('payFirst')) {
+      pushMsg('ASH', STORY.beats.payFirst); pushMsg('LZ', STORY.beats.payFirstSis);
+    } else pushMsg('ASH', `第 ${STORY.debt.periods - d.left} 期已扣。剩 ${d.left} 期。`);
     award('a11');
     if (d.left <= 0) clearDebt();
   } else {
@@ -979,7 +990,9 @@ function debtTick() {
     d.overdue += inst + pen; d.missed += 1; d.nextAt += STORY.debt.period;
     addHeat(10); S.rep = clamp(S.rep - 5, 0, 100);
     pushLog('debt', `月供违约 · 罚息 ${fmt(pen)} 已记`, 0);
-    pushMsg('ASH', `第 ${d.missed} 次没扣到。罚息 ${fmt(pen)}。别让我去她医院。`);
+    if (d.missed === 1) pushMsg('ASH', STORY.beats.miss1);
+    else if (d.missed === 2) pushMsg('ASH', STORY.beats.miss2);
+    else pushMsg('ASH', `第 ${d.missed} 次没扣到。罚息 ${fmt(pen)}。`);
     if (d.missed >= STORY.debt.maxMiss) triggerEnding('liquidated');
   }
 }
@@ -992,10 +1005,13 @@ function medTick() {
     S.credits -= m.cost; m.paid += 1; m.nextAt += STORY.med.period;
     pushLog('med', `续药 -${fmt(m.cost)} · ${STORY.drug.name}`, -m.cost);
     if (m.paid === 1) pushMsg('LZ', '药拿到了。哥，你别太晚睡。');
+    if (m.paid === 3 && once('med3')) pushMsg('LZ', STORY.beats.med3);
   } else {
     m.missed += 1; m.nextAt += STORY.med.period;
     pushLog('med', `药费不足 · 欠 ${fmt(m.cost)}`, 0);
-    pushMsg('LZ', '哥，药停了。医生说不能停。');
+    if (m.missed === 1) pushMsg('LZ', STORY.beats.medMiss1);
+    else if (m.missed === 2) pushMsg('LZ', STORY.beats.medMiss2);
+    else pushMsg('LZ', '哥，药停了。医生说不能停。');
     if (m.missed >= STORY.med.maxMiss) triggerEnding('medstop');
   }
 }
@@ -1005,6 +1021,40 @@ function award(id) {
   S.achievements.push(id);
   const a = ACHIEVEMENTS.find((x) => x.id === id);
   emit('notify', { kind: 'good', title: '成就解锁', text: a ? a.name : id });
+}
+
+// ── 剧情节拍 ───────────────────────────────────────────
+function once(key) {
+  if (!S.story) S.story = { chapter: 1, seen: {} };
+  if (S.story.seen[key]) return false;
+  S.story.seen[key] = true;
+  return true;
+}
+
+export function sisterState() {
+  const m = S.med || { missed: 0, paid: 0 };
+  if (m.missed >= 2) return { k: 'critical', cn: '危急', hint: '断药两次，指标在往下掉' };
+  if (m.missed >= 1) return { k: 'weak', cn: '虚弱', hint: '断过一次药' };
+  if (m.paid < 1) return { k: 'weak', cn: '待药', hint: '第一盒还没续上' };
+  return { k: 'stable', cn: '稳定', hint: `已续 ${m.paid} 盒` };
+}
+
+function storyTick() {
+  if (!S.story) S.story = { chapter: 1, seen: {} };
+  const d = S.debt, m = S.med;
+  let ch = 1;
+  if (d && d.left < STORY.debt.periods) ch = 2;
+  if (d && d.missed >= 1) ch = 3;
+  if (d && d.cleared) ch = 4;
+  if (ch > S.story.chapter) {
+    S.story.chapter = ch;
+    const def = STORY.chapters[ch];
+    if (def) { pushLog('story', `进入 ${def.tag}`, 0); emit('chapter', def); }
+    save();
+  }
+  if (d && !d.cleared && d.nextAt > S.hour && d.nextAt - S.hour <= 48 && once('warn48')) {
+    pushMsg('ASH', STORY.beats.warn48);
+  }
 }
 
 export function pushMsg(from, text) {

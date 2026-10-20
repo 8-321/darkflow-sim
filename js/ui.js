@@ -6,7 +6,7 @@ import {
   contractProgress, retire, triggerEnding, crackReward, cleanReward, subscribe, save, wipe, newGame, load, pushMsg, exportCode, importCode,
   tick, aiAuctionTick,
   startDaily, resumeDaily, dailyInfo, dailyBoard, dailyLeft, finishDaily, exitDaily, abandonDaily, checkDaily, todayStr,
-  debtInfo, medInfo, payInstallment, settleDebt, daysLeft, dueLabel,
+  debtInfo, medInfo, payInstallment, settleDebt, daysLeft, dueLabel, sisterState,
 } from './engine.js';
 import { CATS, RARITY, VENDORS, COMPANIES, CONTRACTS, NPCS, ACHIEVEMENTS, BROADCASTS, TERMINAL_HELP, META, FLAVOR, AUCTION_POOL, ITEMS, STORY, ENDINGS } from './data.js';
 import { initAudio, sfx, setSound } from './audio.js';
@@ -39,6 +39,16 @@ let busy = false;
 // ═══════════════════════════════════════════════════════════
 // 基础组件
 // ═══════════════════════════════════════════════════════════
+function evCost(e = {}) {
+  const out = [];
+  if (e.credits) out.push(`资金 ${e.credits > 0 ? '+' : ''}${fmt(e.credits)}`);
+  if (e.debtOverdue) out.push(`逾期 ${e.debtOverdue > 0 ? '+' : ''}${fmt(e.debtOverdue)}`);
+  if (e.debtPenalty) out.push(`欠款 +${fmt(e.debtPenalty)}`);
+  if (e.heat) out.push(`热度 ${e.heat > 0 ? '+' : ''}${e.heat}`);
+  if (e.rep) out.push(`声望 ${e.rep > 0 ? '+' : ''}${e.rep}`);
+  return out.join(' · ');
+}
+
 function openModal({ title, sub = '', body = '', actions = [], wide = false, esc: closable = true }) {
   closeModal();
   modalActions = actions;
@@ -188,10 +198,12 @@ function renderRail() {
   }
   const din = debtInfo();
   const min = medInfo();
+  const sis = sisterState();
   const debtBlock = `<section class="panel ledger-panel">
       <div class="panel-head"><span>账本</span><span class="mini ${din.cleared ? '' : 'red'}">${din.cleared ? 'CLEAR' : 'DUE'}</span></div>
       <div class="lg-row"><span>月供</span><b class="${!din.cleared && din.days <= 1 ? 'red' : ''}">${din.cleared ? '已结清' : `${fmt(din.installment)} · ${din.days === 0 ? '今天' : din.days + ' 天'}`}</b></div>
       <div class="lg-row"><span>药</span><b class="${min.days <= 1 ? 'red' : ''}">${fmt(min.cost)} · ${min.days === 0 ? '今天' : min.days + ' 天'}</b></div>
+      <div class="lg-row"><span>林栀</span><b class="sis-${sis.k}">${sis.cn}</b></div>
       <div class="mini-bar"><i style="width:${din.cleared ? 100 : Math.max(3, (1 - din.left / STORY.debt.periods) * 100)}%"></i></div>
     </section>`;
   rail.innerHTML = `
@@ -1034,6 +1046,7 @@ function openClean() {
 // 视图：档案
 // ═══════════════════════════════════════════════════════════
 function renderProfile() {
+  const sis = sisterState();
   const stats = [
     ['存活天数', clock().day],
     ['成交笔数', S.stats.trades],
@@ -1063,6 +1076,16 @@ function renderProfile() {
       <section class="panel"><div class="panel-head"><span>统计</span><span class="mini">SESSION</span></div>
         <div class="stat-grid">${stats.map(([k, v]) => `<div class="sg"><label>${k}</label><b>${v}</b></div>`).join('')}</div>
       </section>
+      <section class="panel med-card"><div class="panel-head"><span>病历</span><span class="mini">${sis.cn}</span></div>
+        <div class="med-rows">
+          <div><label>患者</label><b>${STORY.sister.name} · ${STORY.sister.age}</b></div>
+          <div><label>诊断</label><b>${STORY.sister.ill}</b></div>
+          <div><label>方案</label><b>${STORY.drug.name} · ${fmt(STORY.med.cost)} / 7 天</b></div>
+          <div><label>已续</label><b>${S.med.paid} 盒</b></div>
+          <div><label>断药</label><b class="${S.med.missed ? 'bad' : ''}">${S.med.missed} 次</b></div>
+        </div>
+        <div class="id-note">虚构病历 · 仅用于剧情</div>
+      </section>
     </div>
     <section class="panel"><div class="panel-head"><span>委托</span><span class="mini">${CONTRACTS.filter((c) => contractProgress(c.id) >= 1).length}/6</span></div>
       <div class="contract-list">${CONTRACTS.map((c) => {
@@ -1073,7 +1096,7 @@ function renderProfile() {
           <div class="mini-bar"><i style="width:${p * 100}%"></i></div></div>`;
       }).join('')}</div>
     </section>
-    <section class="panel"><div class="panel-head"><span>成就</span><span class="mini">${S.achievements.length}/10</span></div>
+    <section class="panel"><div class="panel-head"><span>成就</span><span class="mini">${S.achievements.length}/${ACHIEVEMENTS.length}</span></div>
       <div class="ach-grid">${ACHIEVEMENTS.map((a) => `<div class="ach ${S.achievements.includes(a.id) ? 'on' : ''}"><b>${a.name}</b><span>${a.desc}</span></div>`).join('')}</div>
     </section>
     <section class="panel"><div class="panel-head"><span>设置</span><span class="mini">LOCAL</span></div>
@@ -1180,7 +1203,7 @@ function checkEvent() {
     title: `事件 · ${ev.title}`,
     sub: ev.tag,
     body: `<div class="event-body"><p class="ev-text">${esc(ev.text)}</p>
-      <div class="ev-choices">${ev.choices.map((c, i) => `<button class="ev-choice" data-ev="${i}"><b>${esc(c.label)}</b><span>${esc((c.effect && c.effect.credits ? `资金 ${c.effect.credits > 0 ? '+' : ''}${fmt(c.effect.credits)} · ` : '') + (c.effect && c.effect.heat ? `热度 ${c.effect.heat > 0 ? '+' : ''}${c.effect.heat} · ` : '') + (c.effect && c.effect.rep ? `声望 ${c.effect.rep > 0 ? '+' : ''}${c.effect.rep}` : ''))}</span></button>`).join('')}</div></div>`,
+      <div class="ev-choices">${ev.choices.map((c, i) => `<button class="ev-choice" data-ev="${i}"><b>${esc(c.label)}</b><span>${esc(evCost(c.effect))}</span></button>`).join('')}</div></div>`,
     actions: [],
     esc: false,
   });
@@ -1411,12 +1434,31 @@ function openDailyEntry() {
   });
 }
 
+function showChapter(def) {
+  const old = document.getElementById('chapter');
+  if (old) old.remove();
+  if (document.getElementById('prologue') || S.ending) return;
+  if (document.querySelector('#modal-root .modal-back')) { def.__t = (def.__t || 0) + 1; if (def.__t < 20) setTimeout(() => showChapter(def), 1400); return; }
+  const el = document.createElement('div');
+  el.id = 'chapter';
+  el.innerHTML = `<div class="ch-inner">
+    <div class="ch-tag">${esc(def.tag)}</div>
+    <h2 class="ch-title">${esc(def.title)}</h2>
+    <div class="ch-lines">${def.lines.map((l, i) => `<p style="animation-delay:${0.25 + i * 0.7}s">${esc(l)}</p>`).join('')}</div>
+    <button class="btn primary" id="chGo">继续</button>
+  </div>`;
+  document.body.appendChild(el);
+  sfx('seal');
+  $('#chGo').onclick = () => { el.classList.add('out'); setTimeout(() => el.remove(), 320); };
+}
+
 function emitHandler(type, payload) {
   if (type === 'notify' && payload) toast(payload.kind, payload.title, payload.text);
   if (type === 'outbid') { toast('warn', '你被反超了', '资金已退回钱包。'); }
   if (type === 'msg') renderTop();
   if (type === 'ending') setTimeout(showEnding, 400);
   if (type === 'dailyEnd') setTimeout(showDailyResult, 300);
+  if (type === 'chapter' && payload) setTimeout(() => showChapter(payload), 300);
   if (type === 'bid' && view === 'auction') renderAuction();
   if (type === 'contract') { /* toast 已由 engine 发 */ }
   renderRail();
@@ -1541,7 +1583,8 @@ function enter(resume) {
   subscribe(emitHandler);
   save();
   if (!resume) {
-    setTimeout(() => toast('info', '会话已建立', '左栏选择市场，先买一件三位数的货。'), 1200);
+    setTimeout(() => showChapter(STORY.chapters[1]), 900);
+    setTimeout(() => toast('info', '会话已建立', '先看左栏的账本：药和妹妹的期限都在里面。'), 5600);
   }
 }
 
